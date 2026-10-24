@@ -89,6 +89,22 @@
   let coarse = matchMedia("(pointer: coarse)").matches;
   const ON_TV = /Web0S|webOS|NetCast|SmartTV|SMART-TV/i.test(navigator.userAgent);
   const IS_WEBOS_APP = ON_TV && location.protocol === "file:";
+
+  // ?debug: lists every input event and error on screen (for checking a TV remote from a screenshot)
+  const DEBUG = /[?&]debug/.test(location.search);
+  const dbg = [];
+  function dlog(s) { if (!DEBUG) return; dbg.push(((performance.now() / 1000) | 0) + "s " + s); if (dbg.length > 22) dbg.shift(); }
+  if (DEBUG) {
+    dlog("UA " + navigator.userAgent);
+    dlog("PointerEvent " + !!window.PointerEvent + "  touch " + ("ontouchstart" in window) + "  maxTouch " + navigator.maxTouchPoints);
+    window.addEventListener("error", (e) => dlog("ERROR " + e.message + " @" + e.lineno));
+    ["pointerdown", "pointerup", "pointercancel", "mousedown", "mouseup", "click", "touchstart", "touchend", "keydown", "keyup", "wheel"].forEach((t) =>
+      window.addEventListener(t, (e) => dlog(t + " " + (e.pointerType || "") + (e.keyCode != null && t.startsWith("key") ? " key " + e.keyCode + " " + e.key : "") +
+        (e.clientX != null ? " @" + (e.clientX | 0) + "," + (e.clientY | 0) : "") + " tgt " + (e.target && (e.target.id || e.target.nodeName)) + (e.defaultPrevented ? " prevented" : "")), true));
+    let lastMove = 0;
+    window.addEventListener("pointermove", (e) => { if (performance.now() - lastMove > 1500) { lastMove = performance.now(); dlog("pointermove " + e.pointerType + " @" + (e.clientX | 0) + "," + (e.clientY | 0)); } }, true);
+    document.addEventListener("cursorStateChange", (e) => dlog("cursorStateChange " + JSON.stringify(e.detail)));
+  }
   let now = 0;
   let pointerDown = false, pointerId = -1, pointerInBox = false;
   let fullscreenTried = false;
@@ -275,6 +291,7 @@
 
   function press(x, y) {
     // a tap / click at canvas px (x, y): overlays first, then the buttons, then the game
+    dlog("press " + (x | 0) + "," + (y | 0));
     if (showCombos) { showCombos = false; play("click"); return; }
     if (showSettings) {
       if (inRect(SETTINGS_BTNS[0], x, y)) { soundOn = !soundOn; try { localStorage.setItem(STORE_SOUND, soundOn ? "1" : "0"); } catch (e) { /* ignore */ } }
@@ -551,6 +568,14 @@
       ctx.fillStyle = "#140a26";
       ctx.fillRect(BOX[0] + 200, BOX[3] - 84, boxW - 400, 42);
       text(actWord() + " anywhere to close", (BOX[0] + BOX[2]) / 2, BOX[3] - 62, 600, 21, "center", "#dcc8eb");
+    }
+    if (DEBUG) {
+      ctx.fillStyle = "rgba(0,0,0,0.78)";
+      ctx.fillRect(0, 0, CW, 40 + dbg.length * 30);
+      ctx.font = "600 22px monospace"; ctx.textAlign = "left"; ctx.textBaseline = "top"; ctx.fillStyle = "#9f9";
+      ctx.fillText("state " + state + "  coarse " + coarse + "  pointerDown " + pointerDown + "  cursorVisible " + cursorVisible + "  win " + winW + "x" + winH + "  dpr " + devicePixelRatio, 12, 8);
+      ctx.fillStyle = "#fff";
+      dbg.forEach((s, i) => ctx.fillText(s.slice(0, 160), 12, 38 + i * 30));
     }
   }
 
