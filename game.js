@@ -521,7 +521,15 @@
     document.getElementById("boot").classList.add("hide");
     requestAnimationFrame(frame);
     if ("serviceWorker" in navigator && location.protocol !== "file:") {
-      navigator.serviceWorker.register("sw.js").catch(() => {});
+      // when a new version's worker takes over (an update was pushed), reload once so it shows now, not next visit
+      const hadController = !!navigator.serviceWorker.controller;
+      let reloaded = false;
+      navigator.serviceWorker.addEventListener("controllerchange", () => {
+        if (!hadController || reloaded || state === PLAYING) return;
+        reloaded = true;
+        location.reload();
+      });
+      navigator.serviceWorker.register("sw.js", { updateViaCache: "none" }).then((r) => r.update()).catch(() => {});
     }
   }
   boot().catch(() => { document.getElementById("boot").textContent = "couldn't load, tap to retry"; document.body.addEventListener("click", () => location.reload(), { once: true }); });

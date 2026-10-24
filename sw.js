@@ -1,5 +1,5 @@
 // Familiar Faces service worker: everything the game needs is cached on install, so it also plays offline / as an app.
-const VERSION = "ff-v2";
+const VERSION = "ff-v3";
 const FILES = [
   "./", "./index.html", "./game.js", "./manifest.webmanifest",
   "./assets/screen.jpg", "./assets/faces.webp", "./assets/combos.webp", "./assets/settings.webp", "./assets/ribbon.webp",
@@ -18,9 +18,11 @@ self.addEventListener("activate", (e) => {
 
 self.addEventListener("fetch", (e) => {
   if (e.request.method !== "GET") return;
-  // network first (a new version shows up at once), the cache when offline
+  // network first (a new version shows up at once), the cache when offline. "no-cache" asks GitHub every time
+  // (a cheap 304 when nothing changed) instead of trusting the browser's 10-minute copy.
+  const sameOrigin = new URL(e.request.url).origin === location.origin;
   e.respondWith(
-    fetch(e.request).then((res) => {
+    fetch(sameOrigin ? new Request(e.request, { cache: "no-cache" }) : e.request).then((res) => {
       if (res && res.ok && new URL(e.request.url).origin === location.origin) {
         const copy = res.clone();
         caches.open(VERSION).then((c) => c.put(e.request, copy));
