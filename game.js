@@ -462,9 +462,13 @@
       else if (k === "down" || k === "menu" || k === "pause") openSettings();
       return;
     }
+    if ((k === "left" || k === "right") && state === PLAYING) {
+      aimTo(PX(cursorX) + (k === "left" ? -45 : 45));
+      return;
+    }
     if (k === "ok") {
       // LG Magic Remote's visible pointer supplies its own click.
-      if (e.keyCode === 13 && ON_TV && (cursorVisible || now - cursorSeen < 1.2)) return;
+      if (e.keyCode === 13 && /Web0S|webOS|NetCast/i.test(navigator.userAgent) && (cursorVisible || now - cursorSeen < 1.2)) return;
       if (now - lastPress < 0.25) return;
       lastPress = now;
       if (state === PLAYING) drop();
