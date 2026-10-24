@@ -20,7 +20,8 @@
   body { position: fixed; inset: 0; touch-action: none; overscroll-behavior: none; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; -webkit-tap-highlight-color: transparent; }
   #bg { position: absolute; inset: -40px; background: #120820 url("assets/screen.jpg") center / cover no-repeat; filter: blur(22px) brightness(0.45) saturate(1.1); transform: translateZ(0); }
   #stage { position: absolute; left: 0; top: 0; transform-origin: 0 0; }
-  #game { position: absolute; display: block; image-rendering: auto; }
+  #game { position: absolute; display: block; image-rendering: auto;
+    -webkit-mask-image: linear-gradient(to bottom, #000 93%, transparent 100%); mask-image: linear-gradient(to bottom, #000 93%, transparent 100%); }
   #boot { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: #f7e6da; font: 600 18px/1.4 "InterX", system-ui, sans-serif; letter-spacing: .12em; text-transform: uppercase; opacity: .85; pointer-events: none; transition: opacity .4s; }
   #boot.hide { opacity: 0; }
 </style>

@@ -7,10 +7,10 @@
 
   // ---------------- layout (the cabinet's facedrop_layout.json, canvas px, origin top-left) ----------------
   const CW = 2048, CH = 1536;
+  const VH = 1280;                                       // rows shown: the HUD ends ~1246; the hint strip below is cropped so the game scales up
   const MPP = 0.00103736499364676;                       // metres per canvas px (the box is 1.0 m wide)
   const BOX = [545.0717703349283, 307.444976076555, 1509.0526315789473, 1215.0813397129186];
   const TITLE = [1027.0622009569379, 741.2631578947369];
-  const HINT = [1027.0622009569379, 1439.846889952153];
   const SCORE = [278.6602870813397, 391.82775119617224];
   const BOARD_ROWS = [556.0956937799043, 621.6267942583731, 692.0574162679425, 763.1004784688995, 829.2440191387559, 895.3875598086124, 961.5311004784689, 1027.6746411483252, 1093.8181818181818, 1159.3492822966507];
   const BOARD_X = { icon: 185.89473684210526, name: 225.89473684210526, score: 477.42583732057415 };
@@ -324,8 +324,8 @@
     const vw = portrait ? winH : winW, vh = portrait ? winW : winH;
     stage.style.width = vw + "px"; stage.style.height = vh + "px";
     stage.style.transform = portrait ? `translate(${winW}px, 0) rotate(90deg)` : "none";
-    scale = Math.min(vw / CW, vh / CH);
-    const cw = CW * scale, ch = CH * scale;
+    scale = Math.min(vw / CW, vh / VH);
+    const cw = CW * scale, ch = VH * scale;
     offX = (vw - cw) / 2; offY = (vh - ch) / 2;
     canvas.style.left = offX + "px"; canvas.style.top = offY + "px";
     canvas.style.width = cw + "px"; canvas.style.height = ch + "px";
@@ -415,7 +415,7 @@
   const actWord = () => coarse ? "tap" : "click";
 
   function draw() {
-    ctx.setTransform(canvas.width / CW, 0, 0, canvas.height / CH, 0, 0);
+    ctx.setTransform(canvas.width / CW, 0, 0, canvas.height / VH, 0, 0);
     ctx.drawImage(A.screen, 0, 0, CW, CH);
 
     // --- the box: aim line, held face, faces, danger line ---
@@ -471,18 +471,10 @@
       const rw = boxW + 38, rh = 250;
       ctx.drawImage(A.ribbon, TITLE[0] - rw / 2, TITLE[1] - rh / 2, rw, rh);
       const l1 = state === OVER ? "GAME FINISHED" : "READY?";
-      const l2 = state === OVER ? "FINAL SCORE " + fmt(score) : (coarse ? "TAP HERE TO PLAY" : "CLICK HERE TO PLAY");
+      const l2 = state === OVER ? "FINAL SCORE " + fmt(score) + (coarse ? "  ·  TAP TO PLAY AGAIN" : "  ·  CLICK TO PLAY AGAIN") : (coarse ? "TAP HERE TO PLAY" : "CLICK HERE TO PLAY");
       text(l1, TITLE[0], TITLE[1] - 28, 800, 64, "center", CREAM, 4);
       text(l2, TITLE[0], TITLE[1] + 38, 800, 31, "center", CREAM, 3);
     }
-
-    // --- hint ---
-    const act = coarse ? "tap the box" : "click the box";
-    let hint;
-    if (state === PLAYING) hint = coarse ? "drag to aim, let go to drop" : "move to aim, click to drop";
-    else if (state === OVER) hint = act + " to play again";
-    else hint = act + " to play";
-    text(hint, HINT[0], HINT[1], 600, 32);
 
     // --- overlays ---
     if (showCombos) ctx.drawImage(A.combos, BOX[0], BOX[1], boxW, BOX[3] - BOX[1]);
