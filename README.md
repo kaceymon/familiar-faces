@@ -12,6 +12,11 @@ Play: https://kaceymon.github.io/familiar-faces/
   Back opens settings mid-game and closes overlays.
 - The SCOREBOARD is your best runs on this device (saved in the browser).
 
+## Open it on the LG TV from this PC
+
+`npm install` once, then `npm run tv`. The first time, the TV asks to allow the connection (accept with the remote);
+after that it opens the game in the TV's browser with no prompt. The pairing key is kept in `dist/` (not committed).
+
 ## LG webOS TV app
 
 `sh webos/build.sh` packages the same files as a webOS app (`dist/com.kaceymon.familiarfaces_<version>_all.ipk`).
