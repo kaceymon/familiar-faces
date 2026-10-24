@@ -1,5 +1,5 @@
 // Familiar Faces service worker: everything the game needs is cached on install, so it also plays offline / as an app.
-const VERSION = "ff-v6";
+const VERSION = "ff-v7";
 const FILES = [
   "./", "./index.html", "./game.js", "./manifest.webmanifest",
   "./assets/screen.jpg", "./assets/faces.webp", "./assets/combos.webp", "./assets/settings.webp", "./assets/ribbon.webp",
