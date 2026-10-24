@@ -328,9 +328,11 @@
   function lockLandscape() {
     try { if (screen.orientation && screen.orientation.lock) screen.orientation.lock("landscape").catch(() => {}); } catch (e) { /* not allowed here */ }
   }
-  // on a phone / tablet, the first START also asks for fullscreen + landscape (only works inside a user gesture)
+  // on a phone / tablet / TV browser, the first START also asks for fullscreen + landscape (only works inside a user
+  // gesture). On an LG TV this hides the browser's URL bar, which otherwise drops down over the game and takes the
+  // remote's presses.
   function goImmersive() {
-    if (fullscreenTried || !coarse) return;
+    if (fullscreenTried || !(coarse || (ON_TV && !IS_WEBOS_APP))) return;
     fullscreenTried = true;
     if (matchMedia("(display-mode: standalone), (display-mode: fullscreen)").matches) { lockLandscape(); return; }
     if (canFullscreen()) toggleFullscreen();
