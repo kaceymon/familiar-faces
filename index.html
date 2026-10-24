@@ -30,6 +30,19 @@
 <div id="bg"></div>
 <div id="stage"><canvas id="game"></canvas></div>
 <div id="boot">loading</div>
+<script>
+// Only load the Alexa bridge when launched by the skill.
+if (/[?&]alexa=1(?:&|$)/.test(location.search)) {
+  var bridge = document.createElement("script");
+  bridge.src = "https://cdn.html.games.alexa.a2z.com/alexa-html/latest/alexa-html.js";
+  bridge.onload = function () {
+    Alexa.create({version: "1.1"}).then(function (client) {
+      window.familiarFacesAlexa = client.alexa;
+    }).catch(function (error) { console.error("Alexa initialization failed", error); });
+  };
+  document.head.appendChild(bridge);
+}
+</script>
 <script src="game.js?v=6"></script>
 </body>
 </html>
