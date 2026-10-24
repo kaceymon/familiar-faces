@@ -49,17 +49,22 @@
   let audioCtx = null, soundOn = true;
   const clips = {};
 
-  async function loadAudio() {
+  // XHR, not fetch: the TV app runs from file://, where fetch is refused. No async/await: older LG TVs run Chrome 53.
+  function loadAudio() {
     const names = ["drop", "merge", "big", "over", "start", "click"];
     try {
       audioCtx = new (window.AudioContext || window.webkitAudioContext)();
     } catch (e) { return; }
-    await Promise.all(names.map(async (n) => {
-      try {
-        const buf = await (await fetch(`assets/fd_${n}.wav`)).arrayBuffer();
-        clips[n] = await audioCtx.decodeAudioData(buf);
-      } catch (e) { /* no sound for this clip */ }
-    }));
+    names.forEach((n) => {
+      const x = new XMLHttpRequest();
+      x.open("GET", "assets/fd_" + n + ".wav");
+      x.responseType = "arraybuffer";
+      x.onload = () => {
+        if (!x.response) return;
+        try { audioCtx.decodeAudioData(x.response, (b) => { clips[n] = b; }, () => {}); } catch (e) { /* no sound for this clip */ }
+      };
+      x.send();
+    });
   }
   function play(name, pitch = 1) {
     if (!soundOn || !audioCtx || !clips[name]) return;
@@ -82,6 +87,8 @@
   let showCombos = false, showSettings = false;
   let runs = [];
   let coarse = matchMedia("(pointer: coarse)").matches;
+  const ON_TV = /Web0S|webOS|NetCast|SmartTV|SMART-TV/i.test(navigator.userAgent);
+  const IS_WEBOS_APP = ON_TV && location.protocol === "file:";
   let now = 0;
   let pointerDown = false, pointerId = -1, pointerInBox = false;
   let fullscreenTried = false;
@@ -342,48 +349,92 @@
   window.addEventListener("orientationchange", () => setTimeout(fit, 50));
   if (window.visualViewport) window.visualViewport.addEventListener("resize", fit);
 
-  canvas.addEventListener("pointerdown", (e) => {
+  // Pointer Events where they exist; plain mouse + touch events on older TV browsers (LG webOS 4 = Chrome 53)
+  const overBox = (x, y) => inRect(BOX, x, y) || (y < BOX[1] && x > BOX[0] && x < BOX[2]);
+  let lastPress = 0;                                     // a click and the remote's OK key can both fire for one press
+  let cursorSeen = 0;                                    // the Magic Remote's pointer moved (its OK is then a click)
+  function down(id, kind, cx, cy) {
     if (pointerDown) return;
-    coarse = e.pointerType !== "mouse";
-    pointerDown = true; pointerId = e.pointerId;
-    try { canvas.setPointerCapture(e.pointerId); } catch (err) { /* synthetic / already gone */ }
-    const [x, y] = toCanvas(e.clientX, e.clientY);
-    pointerInBox = inRect(BOX, x, y) || (y < BOX[1] && x > BOX[0] && x < BOX[2]);
-    if (pointerInBox) aimTo(x);
+    coarse = kind !== "mouse";
+    pointerDown = true; pointerId = id;
+    const p = toCanvas(cx, cy);
+    pointerInBox = overBox(p[0], p[1]);
+    if (pointerInBox) aimTo(p[0]);
     if (audioCtx && audioCtx.state === "suspended") audioCtx.resume();
-  });
-  canvas.addEventListener("pointermove", (e) => {
-    const [x, y] = toCanvas(e.clientX, e.clientY);
-    if (pointerDown && e.pointerId === pointerId) { if (pointerInBox) aimTo(x); return; }
-    if (e.pointerType === "mouse" && !pointerDown && !showCombos && !showSettings && (inRect(BOX, x, y) || (y < BOX[1] && x > BOX[0] && x < BOX[2]))) aimTo(x);
-  });
-  const up = (e) => {
-    if (!pointerDown || e.pointerId !== pointerId) return;
+  }
+  function move(id, kind, cx, cy) {
+    const p = toCanvas(cx, cy);
+    if (kind === "mouse") cursorSeen = now;
+    if (pointerDown && id === pointerId) { if (pointerInBox) aimTo(p[0]); return; }
+    if (kind === "mouse" && !pointerDown && !showCombos && !showSettings && overBox(p[0], p[1])) aimTo(p[0]);
+  }
+  function release(id, cx, cy, cancel) {
+    if (!pointerDown || id !== pointerId) return;
     pointerDown = false;
-    if (e.type === "pointercancel") return;
-    const [x, y] = toCanvas(e.clientX, e.clientY);
-    if (pointerInBox && state === PLAYING && !showCombos && !showSettings) aimTo(x);
-    press(x, y);
-  };
-  canvas.addEventListener("pointerup", up);
-  canvas.addEventListener("pointercancel", up);
+    if (cancel) return;
+    const p = toCanvas(cx, cy);
+    if (pointerInBox && state === PLAYING && !showCombos && !showSettings) aimTo(p[0]);
+    if (now - lastPress < 0.25) return;
+    lastPress = now;
+    press(p[0], p[1]);
+  }
+  if (window.PointerEvent) {
+    canvas.addEventListener("pointerdown", (e) => {
+      try { canvas.setPointerCapture(e.pointerId); } catch (err) { /* synthetic / already gone */ }
+      down(e.pointerId, e.pointerType, e.clientX, e.clientY);
+    });
+    canvas.addEventListener("pointermove", (e) => move(e.pointerId, e.pointerType, e.clientX, e.clientY));
+    canvas.addEventListener("pointerup", (e) => release(e.pointerId, e.clientX, e.clientY, false));
+    canvas.addEventListener("pointercancel", (e) => release(e.pointerId, e.clientX, e.clientY, true));
+  } else {
+    canvas.addEventListener("mousedown", (e) => down(1, "mouse", e.clientX, e.clientY));
+    window.addEventListener("mousemove", (e) => move(1, "mouse", e.clientX, e.clientY));
+    window.addEventListener("mouseup", (e) => release(1, e.clientX, e.clientY, false));
+    const t0 = (e) => e.changedTouches[0];
+    canvas.addEventListener("touchstart", (e) => { e.preventDefault(); const t = t0(e); down(t.identifier + 2, "touch", t.clientX, t.clientY); }, { passive: false });
+    canvas.addEventListener("touchmove", (e) => { e.preventDefault(); const t = t0(e); move(t.identifier + 2, "touch", t.clientX, t.clientY); }, { passive: false });
+    canvas.addEventListener("touchend", (e) => { const t = t0(e); release(t.identifier + 2, t.clientX, t.clientY, false); });
+    canvas.addEventListener("touchcancel", (e) => { const t = t0(e); release(t.identifier + 2, t.clientX, t.clientY, true); });
+  }
   canvas.addEventListener("contextmenu", (e) => e.preventDefault());
+  // the Magic Remote's scroll wheel (and a mouse wheel) slides the aim
+  canvas.addEventListener("wheel", (e) => {
+    if (state !== PLAYING || showCombos || showSettings) return;
+    e.preventDefault();
+    aimTo(PX(cursorX) + (e.deltaY > 0 ? 1 : -1) * 45);
+  }, { passive: false });
+  // webOS tells the app when the remote's pointer shows / hides
+  let cursorVisible = false;
+  document.addEventListener("cursorStateChange", (e) => { cursorVisible = !!(e.detail && e.detail.visibility); });
 
+  // keys by keyCode: TV remotes send no e.code. 461 = the LG remote's Back button.
+  const KEY = { 37: "left", 39: "right", 13: "ok", 32: "ok", 27: "back", 461: "back", 8: "back", 77: "mute", 70: "full", 67: "combos", 403: "combos" };
   const keys = {};
   window.addEventListener("keydown", (e) => {
-    if (e.repeat) { keys[e.code] = true; return; }
-    keys[e.code] = true;
-    if (e.code === "Space" || e.code === "Enter") {
-      e.preventDefault();
+    const k = KEY[e.keyCode];
+    if (!k) return;
+    if (k === "back" && e.keyCode === 8 && !ON_TV) return;
+    e.preventDefault();
+    keys[k] = true;
+    if (e.repeat) return;
+    if (k === "ok") {
+      // with the remote's pointer on screen, OK arrives as a click too: let the click handle it
+      if (e.keyCode === 13 && (cursorVisible || now - cursorSeen < 1.2)) return;
+      if (now - lastPress < 0.25) return;
+      lastPress = now;
       if (showCombos || showSettings) { showCombos = showSettings = false; play("click"); }
       else if (state === PLAYING) drop();
       else startGame();
-    } else if (e.code === "Escape") { showCombos = showSettings = false; }
-    else if (e.code === "KeyM") { soundOn = !soundOn; try { localStorage.setItem(STORE_SOUND, soundOn ? "1" : "0"); } catch (err) { /* ignore */ } }
-    else if (e.code === "KeyF") toggleFullscreen();
-    else if (e.code === "KeyC") showCombos = !showCombos;
+    } else if (k === "back") {
+      if (showCombos || showSettings) { showCombos = showSettings = false; play("click"); }
+      else if (state === PLAYING) { showSettings = true; play("click"); }
+      else if (IS_WEBOS_APP) window.close();
+    }
+    else if (k === "mute") { soundOn = !soundOn; try { localStorage.setItem(STORE_SOUND, soundOn ? "1" : "0"); } catch (err) { /* ignore */ } }
+    else if (k === "full") toggleFullscreen();
+    else if (k === "combos") { showCombos = !showCombos; showSettings = false; play("click"); }
   });
-  window.addEventListener("keyup", (e) => { keys[e.code] = false; });
+  window.addEventListener("keyup", (e) => { const k = KEY[e.keyCode]; if (k) keys[k] = false; });
 
   // ---------------- drawing ----------------
   function cell(rank) { const c = rank % 4, r = 3 - Math.floor(rank / 4); return [c * 512, r * 512]; }
@@ -412,11 +463,20 @@
   }
   const fmt = (n) => n.toLocaleString("en-US");
   const dateShort = (t) => new Date(t).toLocaleDateString(undefined, { month: "short", day: "numeric" });
-  const actWord = () => coarse ? "tap" : "click";
+  const actWord = () => coarse ? "tap" : ON_TV ? "press OK" : "click";
 
   function draw() {
+    // the HUD art is scaled to the screen once (a TV's chip would rescale a 2048 px picture every frame otherwise)
+    if (!bgCache || bgCache.width !== canvas.width || bgCache.height !== canvas.height) {
+      bgCache = document.createElement("canvas");
+      bgCache.width = canvas.width; bgCache.height = canvas.height;
+      const b = bgCache.getContext("2d");
+      b.setTransform(canvas.width / CW, 0, 0, canvas.height / VH, 0, 0);
+      b.drawImage(A.screen, 0, 0, CW, CH);
+    }
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.drawImage(bgCache, 0, 0);
     ctx.setTransform(canvas.width / CW, 0, 0, canvas.height / VH, 0, 0);
-    ctx.drawImage(A.screen, 0, 0, CW, CH);
 
     // --- the box: aim line, held face, faces, danger line ---
     const boxW = BOX[2] - BOX[0];
@@ -471,7 +531,8 @@
       const rw = boxW + 38, rh = 250;
       ctx.drawImage(A.ribbon, TITLE[0] - rw / 2, TITLE[1] - rh / 2, rw, rh);
       const l1 = state === OVER ? "GAME FINISHED" : "READY?";
-      const l2 = state === OVER ? "FINAL SCORE " + fmt(score) + (coarse ? "  ·  TAP TO PLAY AGAIN" : "  ·  CLICK TO PLAY AGAIN") : (coarse ? "TAP HERE TO PLAY" : "CLICK HERE TO PLAY");
+      const verb = actWord().toUpperCase();
+      const l2 = state === OVER ? "FINAL SCORE " + fmt(score) + "  ·  " + verb + " TO PLAY AGAIN" : (ON_TV && !coarse ? "POINT HERE + PRESS OK TO PLAY" : verb + " HERE TO PLAY");
       text(l1, TITLE[0], TITLE[1] - 28, 800, 64, "center", CREAM, 4);
       text(l2, TITLE[0], TITLE[1] + 38, 800, 31, "center", CREAM, 3);
     }
@@ -494,14 +555,14 @@
   }
 
   // ---------------- frame ----------------
-  let last = 0, dtFrame = 1 / 60;
+  let last = 0, dtFrame = 1 / 60, bgCache = null;
   function frame(t) {
     requestAnimationFrame(frame);
     const dt = Math.min(0.05, last ? (t - last) / 1000 : 1 / 60);
     last = t; dtFrame = dt; now = t / 1000;
     if (state === PLAYING) {
-      if (keys.ArrowLeft) aimTo(PX(cursorX) - 700 * dt);
-      if (keys.ArrowRight) aimTo(PX(cursorX) + 700 * dt);
+      if (keys.left) aimTo(PX(cursorX) - 700 * dt);
+      if (keys.right) aimTo(PX(cursorX) + 700 * dt);
       step(dt);
     }
     if (now >= checkAt) { checkAt = now + 0.1; check(0.1); }
@@ -509,14 +570,16 @@
   }
 
   // ---------------- boot ----------------
-  async function boot() {
+  function boot() {
     loadStore();
     fit();
     const fonts = document.fonts ? Promise.all([document.fonts.load("800 64px InterX"), document.fonts.load("600 32px InterX")]).catch(() => {}) : Promise.resolve();
-    const [screen_, faces_, combos_, settings_, ribbon_] = await Promise.all([
+    return Promise.all([
       img("assets/screen.jpg"), img("assets/faces.webp"), img("assets/combos.webp"), img("assets/settings.webp"), img("assets/ribbon.webp"), fonts,
-    ]);
-    A.screen = screen_; A.faces = faces_; A.combos = combos_; A.settings = settings_; A.ribbon = ribbon_;
+    ]).then(started);
+  }
+  function started(got) {
+    A.screen = got[0]; A.faces = got[1]; A.combos = got[2]; A.settings = got[3]; A.ribbon = got[4];
     loadAudio();                                             // sounds arrive when they arrive
     document.getElementById("boot").classList.add("hide");
     requestAnimationFrame(frame);
@@ -532,5 +595,8 @@
       navigator.serviceWorker.register("sw.js", { updateViaCache: "none" }).then((r) => r.update()).catch(() => {});
     }
   }
-  boot().catch(() => { document.getElementById("boot").textContent = "couldn't load, tap to retry"; document.body.addEventListener("click", () => location.reload(), { once: true }); });
+  boot().catch(() => {
+    document.getElementById("boot").textContent = "couldn't load, tap to retry";
+    document.body.addEventListener("click", () => location.reload());
+  });
 })();
