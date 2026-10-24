@@ -87,7 +87,9 @@
   let showCombos = false, showSettings = false;
   let runs = [];
   let coarse = matchMedia("(pointer: coarse)").matches;
-  const ON_TV = /Web0S|webOS|NetCast|SmartTV|SMART-TV/i.test(navigator.userAgent);
+  const ON_TV = /Web0S|webOS|NetCast|SmartTV|SMART-TV|AFT|FireTV/i.test(navigator.userAgent);
+  const ALEXA_GAME = /[?&]alexa=1(?:&|$)/.test(location.search);
+  let remoteMode = false, settingsFocus = 0;
   const IS_WEBOS_APP = ON_TV && location.protocol === "file:";
 
   // ?debug: lists every input event and error on screen (for checking a TV remote from a screenshot)
@@ -296,7 +298,7 @@
     if (showSettings) {
       if (inRect(SETTINGS_BTNS[0], x, y)) { soundOn = !soundOn; try { localStorage.setItem(STORE_SOUND, soundOn ? "1" : "0"); } catch (e) { /* ignore */ } }
       else if (inRect(SETTINGS_BTNS[1], x, y)) { showSettings = false; startGame(); }
-      else if (inRect(SETTINGS_BTNS[2], x, y)) { showSettings = false; toggleFullscreen(); }
+      else if (inRect(SETTINGS_BTNS[2], x, y)) { showSettings = false; if (canFullscreen()) toggleFullscreen(); }
       else showSettings = false;
       play("click");
       return;
@@ -316,6 +318,7 @@
 
   function canFullscreen() { return !!(document.documentElement.requestFullscreen || document.documentElement.webkitRequestFullscreen); }
   function toggleFullscreen() {
+    if (!canFullscreen()) return;
     const el = document.documentElement;
     if (document.fullscreenElement || document.webkitFullscreenElement) {
       (document.exitFullscreen || document.webkitExitFullscreen).call(document);
@@ -374,6 +377,7 @@
   let cursorSeen = 0;                                    // the Magic Remote's pointer moved (its OK is then a click)
   function down(id, kind, cx, cy) {
     if (pointerDown) return;
+    remoteMode = false;
     coarse = kind !== "mouse";
     pointerDown = true; pointerId = id;
     const p = toCanvas(cx, cy);
@@ -426,34 +430,56 @@
   let cursorVisible = false;
   document.addEventListener("cursorStateChange", (e) => { cursorVisible = !!(e.detail && e.detail.visibility); });
 
-  // keys by keyCode: TV remotes send no e.code. 461 = the LG remote's Back button.
-  const KEY = { 37: "left", 39: "right", 13: "ok", 32: "ok", 27: "back", 461: "back", 8: "back", 77: "mute", 70: "full", 67: "combos", 403: "combos" };
+  // Standard browser key values plus legacy TV keyCodes.
+  const KEY = {37:"left",38:"up",39:"right",40:"down",13:"ok",32:"ok",27:"back",461:"back",8:"back",77:"mute",70:"full",67:"combos",403:"combos",93:"menu",179:"pause"};
+  const KEY_NAME = {ArrowLeft:"left",ArrowRight:"right",ArrowUp:"up",ArrowDown:"down",Enter:"ok",Select:"ok"," ":"ok",Escape:"back",Backspace:"back",BrowserBack:"back",GoBack:"back",ContextMenu:"menu",MediaPlayPause:"pause"};
   const keys = {};
+  function keyAction(e) { return KEY_NAME[e.key] || KEY[e.keyCode]; }
+  function clearInput() { Object.keys(keys).forEach((k) => { keys[k] = false; }); pointerDown = false; }
+  function openSettings() { showCombos = false; showSettings = true; settingsFocus = 0; clearInput(); }
   window.addEventListener("keydown", (e) => {
-    const k = KEY[e.keyCode];
+    const k = keyAction(e);
     if (!k) return;
-    if (k === "back" && e.keyCode === 8 && !ON_TV) return;
+    if (k === "back" && e.keyCode === 8 && !ON_TV && !ALEXA_GAME) return;
+    // Leave Back at the title screen to the host so the player can exit.
+    if (k === "back" && state !== PLAYING && !showCombos && !showSettings && !IS_WEBOS_APP) return;
     e.preventDefault();
+    const wasDown = keys[k];
     keys[k] = true;
-    if (e.repeat) return;
+    if (e.repeat || wasDown) return;
+    remoteMode = true;
+    if (audioCtx && audioCtx.state === "suspended") audioCtx.resume();
+    if (showSettings) {
+      if (k === "up" || k === "down") { settingsFocus = (settingsFocus + (k === "up" ? 2 : 1)) % 3; play("click"); }
+      else if (k === "ok") {
+        const r = SETTINGS_BTNS[settingsFocus];
+        press((r[0] + r[2]) / 2, (r[1] + r[3]) / 2);
+      } else if (k === "back" || k === "menu" || k === "pause") { showSettings = false; clearInput(); }
+      return;
+    }
+    if (showCombos) {
+      if (k === "ok" || k === "back" || k === "up" || k === "combos") { showCombos = false; clearInput(); play("click"); }
+      else if (k === "down" || k === "menu" || k === "pause") openSettings();
+      return;
+    }
     if (k === "ok") {
-      // with the remote's pointer on screen, OK arrives as a click too: let the click handle it
-      if (e.keyCode === 13 && (cursorVisible || now - cursorSeen < 1.2)) return;
+      // LG Magic Remote's visible pointer supplies its own click.
+      if (e.keyCode === 13 && ON_TV && (cursorVisible || now - cursorSeen < 1.2)) return;
       if (now - lastPress < 0.25) return;
       lastPress = now;
-      if (showCombos || showSettings) { showCombos = showSettings = false; play("click"); }
-      else if (state === PLAYING) drop();
-      else startGame();
+      if (state === PLAYING) drop();
+      else { goImmersive(); startGame(); }
     } else if (k === "back") {
-      if (showCombos || showSettings) { showCombos = showSettings = false; play("click"); }
-      else if (state === PLAYING) { showSettings = true; play("click"); }
+      if (state === PLAYING) openSettings();
       else if (IS_WEBOS_APP) window.close();
-    }
-    else if (k === "mute") { soundOn = !soundOn; try { localStorage.setItem(STORE_SOUND, soundOn ? "1" : "0"); } catch (err) { /* ignore */ } }
+    } else if (k === "down" || k === "menu" || k === "pause") openSettings();
+    else if (k === "up" || k === "combos") { showCombos = true; clearInput(); play("click"); }
+    else if (k === "mute") { soundOn = !soundOn; try { localStorage.setItem(STORE_SOUND, soundOn ? "1" : "0"); } catch (err) {} }
     else if (k === "full") toggleFullscreen();
-    else if (k === "combos") { showCombos = !showCombos; showSettings = false; play("click"); }
   });
-  window.addEventListener("keyup", (e) => { const k = KEY[e.keyCode]; if (k) keys[k] = false; });
+  window.addEventListener("keyup", (e) => { const k = keyAction(e); if (k) keys[k] = false; });
+  window.addEventListener("blur", clearInput);
+  document.addEventListener("visibilitychange", () => { if (document.hidden) { clearInput(); if (state === PLAYING) openSettings(); } });
 
   // ---------------- drawing ----------------
   function cell(rank) { const c = rank % 4, r = 3 - Math.floor(rank / 4); return [c * 512, r * 512]; }
@@ -482,7 +508,7 @@
   }
   const fmt = (n) => n.toLocaleString("en-US");
   const dateShort = (t) => new Date(t).toLocaleDateString(undefined, { month: "short", day: "numeric" });
-  const actWord = () => coarse ? "tap" : ON_TV ? "press OK" : "click";
+  const actWord = () => remoteMode ? "press OK" : coarse ? "tap" : ON_TV ? "press OK" : "click";
 
   function draw() {
     // the HUD art is scaled to the screen once (a TV's chip would rescale a 2048 px picture every frame otherwise)
@@ -551,7 +577,7 @@
       ctx.drawImage(A.ribbon, TITLE[0] - rw / 2, TITLE[1] - rh / 2, rw, rh);
       const l1 = state === OVER ? "GAME FINISHED" : "READY?";
       const verb = actWord().toUpperCase();
-      const l2 = state === OVER ? "FINAL SCORE " + fmt(score) + "  ·  " + verb + " TO PLAY AGAIN" : (ON_TV && !coarse ? "POINT HERE + PRESS OK TO PLAY" : verb + " HERE TO PLAY");
+      const l2 = state === OVER ? "FINAL SCORE " + fmt(score) + "  ·  " + verb + " TO PLAY AGAIN" : (remoteMode ? "PRESS OK TO PLAY · UP: COMBOS · DOWN: SETTINGS" : ON_TV && !coarse ? "POINT HERE + PRESS OK TO PLAY" : verb + " HERE TO PLAY");
       text(l1, TITLE[0], TITLE[1] - 28, 800, 64, "center", CREAM, 4);
       text(l2, TITLE[0], TITLE[1] + 38, 800, 31, "center", CREAM, 3);
     }
@@ -562,14 +588,19 @@
       ctx.drawImage(A.settings, BOX[0], BOX[1], boxW, BOX[3] - BOX[1]);
       const fs = document.fullscreenElement || document.webkitFullscreenElement;
       const labels = [soundOn ? "SOUND: ON" : "SOUND: OFF", "NEW GAME", canFullscreen() ? (fs ? "EXIT FULLSCREEN" : "FULLSCREEN") : "CLOSE"];
+      if (remoteMode) {
+        const selected = SETTINGS_BTNS[settingsFocus];
+        ctx.strokeStyle = "#8ff7ff"; ctx.lineWidth = 7;
+        ctx.strokeRect(selected[0] - 8, selected[1] - 8, selected[2] - selected[0] + 16, selected[3] - selected[1] + 16);
+      }
       SETTINGS_BTNS.forEach((b, i) => text(labels[i], (b[0] + b[2]) / 2, (b[1] + b[3]) / 2, 600, 36, "center", CREAM, 2));
-      text(actWord() + " anywhere else to close", (BOX[0] + BOX[2]) / 2, BOX[3] - 62, 600, 21, "center", "#dcc8eb");
+      text(remoteMode ? "UP / DOWN TO CHOOSE · OK TO SELECT · BACK TO CLOSE" : actWord() + " anywhere else to close", (BOX[0] + BOX[2]) / 2, BOX[3] - 62, 600, 21, "center", "#dcc8eb");
     }
     // the "point here + pull the trigger to close" line is baked into the COMBOS art; cover it with the web wording
     if (showCombos) {
       ctx.fillStyle = "#140a26";
       ctx.fillRect(BOX[0] + 200, BOX[3] - 84, boxW - 400, 42);
-      text(actWord() + " anywhere to close", (BOX[0] + BOX[2]) / 2, BOX[3] - 62, 600, 21, "center", "#dcc8eb");
+      text(remoteMode ? "OK / BACK TO CLOSE" : actWord() + " anywhere to close", (BOX[0] + BOX[2]) / 2, BOX[3] - 62, 600, 21, "center", "#dcc8eb");
     }
     if (DEBUG) {
       ctx.fillStyle = "rgba(0,0,0,0.78)";
@@ -587,12 +618,12 @@
     requestAnimationFrame(frame);
     const dt = Math.min(0.05, last ? (t - last) / 1000 : 1 / 60);
     last = t; dtFrame = dt; now = t / 1000;
-    if (state === PLAYING) {
+    if (state === PLAYING && !showSettings && !showCombos) {
       if (keys.left) aimTo(PX(cursorX) - 700 * dt);
       if (keys.right) aimTo(PX(cursorX) + 700 * dt);
       step(dt);
     }
-    if (now >= checkAt) { checkAt = now + 0.1; check(0.1); }
+    if (now >= checkAt) { checkAt = now + 0.1; if (!showSettings && !showCombos) check(0.1); }
     draw();
   }
 
