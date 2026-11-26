@@ -1,0 +1,12 @@
+{
+  "name": "familiar-faces",
+  "private": true,
+  "description": "Familiar Faces web game. No build step; these scripts are only for the LG TV.",
+  "scripts": {
+    "tv": "node webos/tv-open.js",
+    "webos": "sh webos/build.sh"
+  },
+  "devDependencies": {
+    "lgtv2": "^1.9.0"
+  }
+}
